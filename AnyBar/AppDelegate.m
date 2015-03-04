@@ -12,9 +12,9 @@
 
 @property (weak, nonatomic) IBOutlet NSWindow *window;
 @property (strong, nonatomic) NSStatusItem *statusItem;
-@property (strong, nonatomic) GCDAsyncUdpSocket *udpSocket;
 @property (assign, nonatomic) BOOL dark;
 @property (strong, nonatomic) NSString *imageName;
+@property (strong, nonatomic) UdpServer *udpServer;
 
 @end
 
@@ -28,7 +28,9 @@
 
     @try {
         port = [self getUdpPort];
-        _udpSocket = [self initializeUdpSocket: port];
+        
+        _udpServer = [[UdpServer alloc] initWithPort: port];
+        [_udpServer setDelegate:self];
     }
     @catch(NSException *ex) {
         NSLog(@"Error: %@: %@", ex.name, ex.reason);
@@ -53,15 +55,15 @@
 }
 
 -(void)applicationWillTerminate:(NSNotification *)aNotification {
-    [self shutdownUdpSocket: _udpSocket];
-    _udpSocket = nil;
+    [_udpServer setDelegate:nil];
+    _udpServer = nil;
 
     [[NSStatusBar systemStatusBar] removeStatusItem:_statusItem];
     _statusItem = nil;
 }
 
 -(int) getUdpPort {
-    int port = [self readIntFromEnvironmentVariable:@"ANYBAR_PORT" usingDefault:@"1738"];
+    int port = [ProcessEnvironment readInt:@"ANYBAR_PORT" usingDefault:1738];
 
     if (port < 0 || port > 65535) {
         @throw([NSException exceptionWithName:@"Argument Exception"
@@ -80,40 +82,6 @@
     else
         self.dark = NO;
     [self setImage:_imageName];
-}
-
--(GCDAsyncUdpSocket*)initializeUdpSocket:(int)port {
-    NSError *error = nil;
-    GCDAsyncUdpSocket *udpSocket = [[GCDAsyncUdpSocket alloc]
-                                    initWithDelegate:self
-                                    delegateQueue:dispatch_get_main_queue()];
-
-    [udpSocket bindToPort:port error:&error];
-    if (error) {
-        @throw([NSException exceptionWithName:@"UDP Exception"
-                            reason:[NSString stringWithFormat:@"Binding to %d failed", port]
-                            userInfo:@{@"error": error}]);
-    }
-
-    [udpSocket beginReceiving:&error];
-    if (error) {
-        @throw([NSException exceptionWithName:@"UDP Exception"
-                            reason:[NSString stringWithFormat:@"Receiving from %d failed", port]
-                            userInfo:@{@"error": error}]);
-    }
-
-    return udpSocket;
-}
-
--(void)shutdownUdpSocket:(GCDAsyncUdpSocket*)sock {
-    if (sock != nil) {
-        [sock close];
-    }
-}
-
--(void)udpSocket:(GCDAsyncUdpSocket *)sock didReceiveData:(NSData *)data
-      fromAddress:(NSData *)address withFilterContext:(id)filterContext {
-    [self processUdpSocketMsg:sock withData:data fromAddress:address];
 }
 
 -(NSImage*)tryImage:(NSString *)path {
@@ -188,30 +156,4 @@
     return menu;
 }
 
--(int) readIntFromEnvironmentVariable:(NSString*) envVariable usingDefault:(NSString*) defStr {
-    int intVal = -1;
-
-    NSString *envStr = [[[NSProcessInfo processInfo]
-                         environment] objectForKey:envVariable];
-    if (!envStr) {
-        envStr = defStr;
-    }
-
-    NSNumberFormatter *nFormatter = [[NSNumberFormatter alloc] init];
-    nFormatter.numberStyle = NSNumberFormatterDecimalStyle;
-    NSNumber *number = [nFormatter numberFromString:envStr];
-
-    if (!number) {
-        @throw([NSException exceptionWithName:@"Argument Exception"
-                            reason:[NSString stringWithFormat:@"Parsing integer from %@ failed", envStr]
-                            userInfo:@{@"argument": envStr}]);
-
-    }
-
-    intVal = [number intValue];
-
-    return intVal;
-}
-
 @end
-
